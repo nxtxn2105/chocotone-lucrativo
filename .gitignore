@@ -1,0 +1,4 @@
+ template-source/
+.DS_Store
+Thumbs.db
+*.tmp
