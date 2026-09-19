@@ -101,37 +101,68 @@
     });
   }
 
-  // 4. Delegação de clique com redirecionamento forçado & InitiateCheckout
+  // Helper seguro para disparar no Pixel
+  function trackPixel(eventName, params, isCustom) {
+    if (typeof window.fbq === 'function') {
+      try {
+        if (isCustom) {
+          window.fbq('trackCustom', eventName, params || {});
+        } else {
+          window.fbq('track', eventName, params || {});
+        }
+      } catch (err) {
+        console.warn('Erro Pixel:', err);
+      }
+    }
+  }
+
+  // 4. Delegação de clique para CHECKOUT (Lowify) com garantia de envio do Pixel
   document.addEventListener('click', function (e) {
     var link = e.target.closest('a[href*="lowify.com.br"], a[href*="checkout"], a[href*="go.php"]');
     if (!link) return;
 
+    e.preventDefault(); // Previne navegação instantânea para o Pixel ter tempo de enviar
     var finalUrl = buildTargetUrl(link.href);
 
-    // Dispara InitiateCheckout no Pixel com dados de valor
-    if (typeof fbq !== 'undefined') {
-      try {
-        var isDownsell = link.href.indexOf('ae749aea') !== -1;
-        var isBasic = link.href.indexOf('xWMjG4') !== -1;
-        var val = isDownsell ? 19.90 : (isBasic ? 14.90 : 27.90);
-        fbq('track', 'InitiateCheckout', {
-          content_name: isDownsell ? 'Kit Completo Downsell' : (isBasic ? 'Kit Básico' : 'Kit Completo Panetones'),
-          value: val,
-          currency: 'BRL'
-        });
-      } catch (err) {}
-    }
+    var isDownsell = link.href.indexOf('ae749aea') !== -1;
+    var isBasic = link.href.indexOf('xWMjG4') !== -1;
+    var val = isDownsell ? 19.90 : (isBasic ? 14.90 : 27.90);
+    var name = isDownsell ? 'Kit Completo Downsell' : (isBasic ? 'Kit Básico' : 'Kit Completo Panetones');
 
-    // Garante que o href esteja 100% atualizado
-    link.href = finalUrl;
+    // Dispara InitiateCheckout no Pixel
+    trackPixel('InitiateCheckout', {
+      content_name: name,
+      value: val,
+      currency: 'BRL'
+    });
+
+    // Redireciona com delay de 180ms para a Meta receber a requisição de rede
+    setTimeout(function () {
+      window.location.href = finalUrl;
+    }, 180);
   }, true);
 
-  // 5. Suporte a rolagem suave para os botões que apontam para a seção #oferta
+  // 5. Rastreamento e rolagem suave para TODOS os outros CTAs da página (#oferta)
   document.addEventListener('click', function (e) {
-    var anchor = e.target.closest('a[href^="#"]');
-    if (!anchor) return;
-    var targetId = anchor.getAttribute('href');
-    if (targetId && targetId.length > 1) {
+    var cta = e.target.closest('a[href^="#"], .cta-btn, button.cta-btn');
+    if (!cta) return;
+
+    // Se for link de checkout, já foi tratado acima
+    if (cta.href && (cta.href.indexOf('lowify') !== -1 || cta.href.indexOf('checkout') !== -1 || cta.href.indexOf('go.php') !== -1)) {
+      return;
+    }
+
+    var ctaText = (cta.innerText || cta.textContent || 'CTA').trim().replace(/\s+/g, ' ');
+
+    // Dispara evento de engajamento no Pixel para qualquer CTA clicado
+    trackPixel('CliqueCTA', {
+      botao: ctaText,
+      secao: cta.getAttribute('href') || 'popup'
+    }, true);
+
+    // Se for âncora (#oferta), faz scroll suave
+    var targetId = cta.getAttribute('href');
+    if (targetId && targetId.length > 1 && targetId.startsWith('#')) {
       var targetEl = document.querySelector(targetId);
       if (targetEl) {
         e.preventDefault();
