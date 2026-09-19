@@ -34,72 +34,110 @@
 
 
 /* ============================================================
-   UTMs NOS LINKS DE CHECKOUT
-   Estratégia: delegação no document + aplicação direta nos links
-
-   Fazemos as duas coisas:
-   1. Aplicamos UTMs diretamente nos links existentes (DOMContentLoaded)
-   2. Delegamos o evento InitiateCheckout no document (captura qualquer
-      clique em link de checkout, mesmo que o DOM mude depois)
+   ENGINE BLINDADO DE CAPTURA & REPASSE FORÇADO DE PARÂMETROS
+   - Captura 100% dos parâmetros da URL (utm_*, src, sck, fbclid, etc.)
+   - Persiste no localStorage e sessionStorage
+   - Injeta em todos os links de checkout e ofertas
+   - Intercepta cliques e FORÇA o redirecionamento com todos os parâmetros
+   - Back-Redirect inteligente para salvamento de tráfego (Downsell)
 ============================================================ */
 (function () {
-  var utmKeys = ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','src'];
+  var STORAGE_KEY = '__lead_tracking_params__';
+  var DOWNSELL_URL = 'https://pay.lowify.com.br/go.php?offer=ae749aea';
 
-  function getUtmParams() {
-    var params = new URLSearchParams(window.location.search);
-    var result = {};
-    var hasAny = false;
-    utmKeys.forEach(function (k) {
-      if (params.has(k)) { result[k] = params.get(k); hasAny = true; }
+  // 1. Captura e persiste todos os parâmetros da URL
+  function getAllParams() {
+    var currentParams = new URLSearchParams(window.location.search);
+    var savedParams = {};
+
+    try {
+      var stored = sessionStorage.getItem(STORAGE_KEY) || localStorage.getItem(STORAGE_KEY);
+      if (stored) savedParams = JSON.parse(stored);
+    } catch (e) {}
+
+    // Sobrescreve com os parâmetros da URL atual
+    currentParams.forEach(function (value, key) {
+      savedParams[key] = value;
     });
-    return hasAny ? result : null;
+
+    // Se houver parâmetros novos, salva
+    if (Object.keys(savedParams).length > 0) {
+      try {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(savedParams));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(savedParams));
+      } catch (e) {}
+    }
+
+    return savedParams;
   }
 
-  function applyUtmsToLink(link, utms) {
-    if (!utms || link.dataset.utmSet) return;
-    link.dataset.utmSet = '1';
+  // 2. Constrói URL final com todos os parâmetros preservados
+  function buildTargetUrl(rawHref) {
+    if (!rawHref) return rawHref;
+    var params = getAllParams();
+    if (!params || Object.keys(params).length === 0) return rawHref;
+
     try {
-      var url = new URL(link.href);
-      Object.keys(utms).forEach(function (k) { url.searchParams.set(k, utms[k]); });
-      link.href = url.toString();
+      var target = new URL(rawHref, window.location.origin);
+      Object.keys(params).forEach(function (k) {
+        if (!target.searchParams.has(k)) {
+          target.searchParams.set(k, params[k]);
+        }
+      });
+      return target.toString();
     } catch (e) {
-      /* URL inválida — ignora */
+      return rawHref;
     }
   }
 
-  function applyUtmsToAllCheckoutLinks() {
-    var utms = getUtmParams();
-    if (!utms) return;
-    document.querySelectorAll('a[href*="checkout"], a[href*="lowify.com.br"], a[href*="go.php"]').forEach(function (link) {
-      applyUtmsToLink(link, utms);
+  // 3. Injeta nos links presentes no DOM
+  function injectParamsInLinks() {
+    var links = document.querySelectorAll('a[href*="lowify.com.br"], a[href*="checkout"], a[href*="go.php"]');
+    links.forEach(function (link) {
+      var updated = buildTargetUrl(link.href);
+      if (updated && updated !== link.href) {
+        link.href = updated;
+      }
     });
   }
 
-  /*
-    Delegação: InitiateCheckout dispara em qualquer clique em link
-    de checkout, independente de quando o DOM montou.
-    Também aplica UTMs no momento do clique como fallback final.
-  */
+  // 4. Delegação de clique com redirecionamento forçado & InitiateCheckout
   document.addEventListener('click', function (e) {
-    var link = e.target.closest('a[href*="checkout"], a[href*="lowify.com.br"], a[href*="go.php"]');
+    var link = e.target.closest('a[href*="lowify.com.br"], a[href*="checkout"], a[href*="go.php"]');
     if (!link) return;
 
-    /* Aplica UTMs no clique como fallback (caso não tenha aplicado antes) */
-    var utms = getUtmParams();
-    if (utms) applyUtmsToLink(link, utms);
+    var finalUrl = buildTargetUrl(link.href);
 
-    /* Dispara InitiateCheckout — apenas aqui, nunca no PageLoad */
+    // Dispara InitiateCheckout no Pixel
     if (typeof fbq !== 'undefined') {
-      fbq('track', 'InitiateCheckout');
+      try {
+        fbq('track', 'InitiateCheckout');
+      } catch (err) {}
     }
-  }, { passive: true });
 
-  /* Aplica UTMs nos links existentes assim que o DOM estiver pronto */
+    // Garante que o href esteja 100% atualizado
+    link.href = finalUrl;
+  }, true);
+
+  // 5. Executa nos ciclos de vida da página
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', applyUtmsToAllCheckoutLinks);
+    document.addEventListener('DOMContentLoaded', injectParamsInLinks);
   } else {
-    applyUtmsToAllCheckoutLinks();
+    injectParamsInLinks();
   }
+  window.addEventListener('load', injectParamsInLinks);
+
+  // 6. BACK-REDIRECT (Salvamento de tráfego quando o usuário clica em 'Voltar')
+  (function initBackRedirect() {
+    try {
+      var stateObj = { page: 'offer' };
+      window.history.pushState(stateObj, '', window.location.href);
+      window.addEventListener('popstate', function () {
+        var destination = buildTargetUrl(DOWNSELL_URL);
+        window.location.href = destination;
+      });
+    } catch (e) {}
+  })();
 })();
 
 
