@@ -108,10 +108,17 @@
 
     var finalUrl = buildTargetUrl(link.href);
 
-    // Dispara InitiateCheckout no Pixel
+    // Dispara InitiateCheckout no Pixel com dados de valor
     if (typeof fbq !== 'undefined') {
       try {
-        fbq('track', 'InitiateCheckout');
+        var isDownsell = link.href.indexOf('ae749aea') !== -1;
+        var isBasic = link.href.indexOf('xWMjG4') !== -1;
+        var val = isDownsell ? 19.90 : (isBasic ? 14.90 : 27.90);
+        fbq('track', 'InitiateCheckout', {
+          content_name: isDownsell ? 'Kit Completo Downsell' : (isBasic ? 'Kit Básico' : 'Kit Completo Panetones'),
+          value: val,
+          currency: 'BRL'
+        });
       } catch (err) {}
     }
 
