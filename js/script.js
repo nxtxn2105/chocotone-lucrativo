@@ -126,25 +126,27 @@
     link.href = finalUrl;
   }, true);
 
-  // 5. Executa nos ciclos de vida da página
+  // 5. Suporte a rolagem suave para os botões que apontam para a seção #oferta
+  document.addEventListener('click', function (e) {
+    var anchor = e.target.closest('a[href^="#"]');
+    if (!anchor) return;
+    var targetId = anchor.getAttribute('href');
+    if (targetId && targetId.length > 1) {
+      var targetEl = document.querySelector(targetId);
+      if (targetEl) {
+        e.preventDefault();
+        targetEl.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+  });
+
+  // 6. Executa nos ciclos de vida da página
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', injectParamsInLinks);
   } else {
     injectParamsInLinks();
   }
   window.addEventListener('load', injectParamsInLinks);
-
-  // 6. BACK-REDIRECT (Salvamento de tráfego quando o usuário clica em 'Voltar')
-  (function initBackRedirect() {
-    try {
-      var stateObj = { page: 'offer' };
-      window.history.pushState(stateObj, '', window.location.href);
-      window.addEventListener('popstate', function () {
-        var destination = buildTargetUrl(DOWNSELL_URL);
-        window.location.href = destination;
-      });
-    } catch (e) {}
-  })();
 })();
 
 
